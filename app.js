@@ -6,15 +6,23 @@ const bcrypt = require("bcryptjs");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const crypto = require("crypto");
 
 const app = express();
 
-const PUBLIC_DIR = path.join(__dirname, "public");
-const UPLOAD_DIR = path.join(__dirname, "uploads");
-const USERS_PATH = path.join(__dirname, "users.json");
-const POSTS_PATH = path.join(__dirname, "posts.json");
+// Vercel Functions: read-only filesystem, writable /tmp scratch space. :contentReference[oaicite:2]{index=2}
+const IS_VERCEL = !!process.env.VERCEL;
 
+// Put ALL writable data under /tmp on Vercel; keep normal files locally.
+const DATA_ROOT = IS_VERCEL ? path.join(os.tmpdir(), "vox") : __dirname;
+
+const PUBLIC_DIR = path.join(__dirname, "public");
+const UPLOAD_DIR = path.join(DATA_ROOT, "uploads");
+const USERS_PATH = path.join(DATA_ROOT, "users.json");
+const POSTS_PATH = path.join(DATA_ROOT, "posts.json");
+
+// Ensure writable dirs/files exist (in /tmp on Vercel)
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 if (!fs.existsSync(USERS_PATH)) fs.writeFileSync(USERS_PATH, "[]", "utf8");
 if (!fs.existsSync(POSTS_PATH)) fs.writeFileSync(POSTS_PATH, "[]", "utf8");
@@ -39,6 +47,9 @@ function safeUsername(u) {
 
 app.use(express.json({ limit: "1mb" }));
 
+// Helpful for hosted environments (safe even if not strictly required here)
+if (IS_VERCEL) app.set("trust proxy", 1);
+
 app.use(
   session({
     secret: process.env.SESSION_SECRET || "vox-dev-secret-change-me",
@@ -47,22 +58,34 @@ app.use(
     cookie: {
       httpOnly: true,
       sameSite: "lax",
-      // secure: true, // enable when hosting behind HTTPS + trust proxy
+      // secure: true, // enable later when you move to real auth + HTTPS cookie policy
     },
   })
 );
 
-// Local dev convenience: serve static assets via Express.
-// On Vercel, static assets are served from public/** (express.static is ignored there).
+// NOTE: On Vercel, express.static() is ignored — static assets must be in public/**. :contentReference[oaicite:3]{index=3}
+// Keeping these helps local dev only.
 app.use(express.static(PUBLIC_DIR));
-app.use("/uploads", express.static(UPLOAD_DIR));
+
+// Serve uploads via a real route (NOT express.static) so it still works on Vercel.
+// Still not "production durable" (files live in /tmp), but it stops crashing.
+app.get("/uploads/:file", (req, res) => {
+  const name = String(req.params.file || "");
+  if (!/^[a-zA-Z0-9._-]+$/.test(name)) return res.status(400).end();
+
+  const filePath = path.join(UPLOAD_DIR, name);
+  if (!filePath.startsWith(UPLOAD_DIR)) return res.status(400).end();
+  if (!fs.existsSync(filePath)) return res.status(404).end();
+
+  res.sendFile(filePath);
+});
 
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: "not_logged_in" });
   next();
 }
 
-// --- Auth APIs ---
+// --- Auth ---
 app.get("/api/me", (req, res) => {
   if (!req.session.userId) return res.json({ loggedIn: false });
 
@@ -122,7 +145,7 @@ app.post("/api/auth/logout", (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
-// --- Upload + Posts ---
+// --- Uploads + Posts ---
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => {
@@ -175,9 +198,9 @@ app.post("/api/posts", requireAuth, upload.single("audio"), (req, res) => {
   res.json({ ok: true, post });
 });
 
-// --- OpenAI TTS (assistant voice) ---
+// --- OpenAI TTS ---
 const ALLOWED_VOICES = new Set([
-  "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse",
+  "alloy","ash","ballad","coral","echo","fable","onyx","nova","sage","shimmer","verse",
 ]);
 
 app.post("/api/tts", async (req, res) => {
@@ -189,7 +212,6 @@ app.post("/api/tts", async (req, res) => {
 
   if (!process.env.OPENAI_API_KEY) return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
   if (!text) return res.status(400).json({ error: "Missing text" });
-  if (text.length > 600) return res.status(400).json({ error: "Text too long for demo TTS" });
 
   const r = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
@@ -209,17 +231,7 @@ app.post("/api/tts", async (req, res) => {
   if (!r.ok) return res.status(500).send(await r.text());
 
   const buf = Buffer.from(await r.arrayBuffer());
-
-  const contentType =
-    format === "mp3" ? "audio/mpeg" :
-    format === "opus" ? "audio/opus" :
-    format === "aac" ? "audio/aac" :
-    format === "wav" ? "audio/wav" :
-    format === "flac" ? "audio/flac" :
-    format === "pcm" ? "audio/pcm" :
-    "application/octet-stream";
-
-  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Type", format === "mp3" ? "audio/mpeg" : "application/octet-stream");
   res.send(buf);
 });
 
