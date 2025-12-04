@@ -2,7 +2,7 @@
   "name": "vox-prototype",
   "version": "1.0.0",
   "description": "Voice-only social media prototype (Windows + AirPods + Chrome)",
-  "main": "server.js",
+  "main": "app.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js"
