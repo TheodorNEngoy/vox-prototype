@@ -1,118 +1,219 @@
-﻿import "./style.css";
-import { RealtimeAgent, RealtimeSession } from "@openai/agents/realtime";
+import "./style.css";
+import { RealtimeAgent, RealtimeSession, tool } from "@openai/agents/realtime";
+import { z } from "zod";
 
-const startBtn = document.querySelector("#startBtn");
-const stopBtn = document.querySelector("#stopBtn");
-const statusEl = document.querySelector("#status");
-const logEl = document.querySelector("#log");
-const promptEl = document.querySelector("#prompt");
+const app = document.querySelector("#app");
+app.innerHTML = `
+  <div class="shell">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <div class="h1">Vox Gateway <span class="badge">Project Keys + Voice Social</span></div>
+          <div class="small">Start → allow mic → say “newest posts” or “create a post: …”</div>
+        </div>
+        <div id="status" class="badge">idle</div>
+      </div>
 
-promptEl.value = [
-  "You are Vox, a voice-first assistant.",
-  "Be concise and natural.",
-  "If the user asks for 'newest posts', propose a short plan and ask one follow-up question.",
-].join("\n");
+      <div style="height:12px"></div>
 
-let session = null;
-let sessionId = null;
+      <div class="row">
+        <input id="accessKey" placeholder="Access key (x-vox-project-key)" />
+        <input id="username" placeholder="username (e.g. theodor)" />
+        <button id="save">Save</button>
+      </div>
+
+      <div style="height:12px"></div>
+
+      <div class="row">
+        <button id="start">Start</button>
+        <button id="stop" disabled>Stop</button>
+        <button id="clear">Clear log</button>
+      </div>
+
+      <div style="height:12px"></div>
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+`;
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+const logEl = $("log");
+
+function setStatus(s) {
+  statusEl.textContent = s;
+}
 
 function log(line) {
-  const time = new Date().toLocaleTimeString();
-  logEl.textContent = `[${time}] ${line}\n` + logEl.textContent;
+  const ts = new Date().toLocaleTimeString();
+  logEl.textContent = `[${ts}] ${line}\n` + logEl.textContent;
 }
 
-async function postEvent(type, payload = {}) {
-  if (!sessionId) return;
-  try {
-    await fetch("/api/log-event", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, type, payload }),
-    });
-  } catch {
-    // best-effort; logging should never break UX
+const STORAGE = {
+  accessKey: "vox_access_key",
+  username: "vox_username",
+};
+
+function getAccessKey() {
+  return $("accessKey").value.trim() || localStorage.getItem(STORAGE.accessKey) || "";
+}
+function getUsername() {
+  return $("username").value.trim() || localStorage.getItem(STORAGE.username) || "anon";
+}
+
+$("accessKey").value = localStorage.getItem(STORAGE.accessKey) || "";
+$("username").value = localStorage.getItem(STORAGE.username) || "";
+
+$("save").onclick = () => {
+  const ak = $("accessKey").value.trim();
+  const un = $("username").value.trim();
+  if (ak) localStorage.setItem(STORAGE.accessKey, ak);
+  if (un) localStorage.setItem(STORAGE.username, un);
+  log("Saved settings.");
+};
+
+$("clear").onclick = () => (logEl.textContent = "");
+
+async function api(path, { method = "GET", body } = {}) {
+  const key = getAccessKey();
+  if (!key) throw new Error("Missing access key. Paste your project key, click Save.");
+
+  // Send both headers to remain compatible with older clients,
+  // but the backend primarily expects x-vox-project-key.
+  const headers = {
+    "x-vox-project-key": key,
+    "x-vox-demo-key": key,
+  };
+
+  let payload;
+  if (body !== undefined) {
+    headers["content-type"] = "application/json";
+    payload = JSON.stringify(body);
   }
+
+  const res = await fetch(path, { method, headers, body: payload });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${txt}`);
+  }
+  return res.json();
 }
 
-async function fetchEphemeralKey(instructions) {
-  const r = await fetch("/api/realtime-token", {
+// ---- Tools (voice -> actions) ----
+const get_newest_posts = tool({
+  name: "get_newest_posts",
+  description: "Fetch newest posts and return a short natural spoken summary.",
+  parameters: z.object({ limit: z.number().int().min(1).max(10).default(5) }),
+  async execute({ limit }) {
+    const data = await api(`/api/posts?limit=${limit}`);
+    const posts = data.posts || [];
+    if (!posts.length) return "There are no posts yet.";
+
+    const lines = posts.map((p) => `${p.author} said: ${p.text}`);
+    return `Here are the newest posts. ${lines.join(" ")} `;
+  },
+});
+
+const create_post = tool({
+  name: "create_post",
+  description: "Create a new post in the feed.",
+  parameters: z.object({ text: z.string().min(1).max(1000) }),
+  needsApproval: true,
+  async execute({ text }) {
+    const author = getUsername();
+    const { post } = await api("/api/posts", { method: "POST", body: { author, text } });
+    return `Posted. ${post.author} said: ${post.text}`;
+  },
+});
+
+const agent = new RealtimeAgent({
+  name: "Vox",
+  instructions: `
+You are Vox: a voice-only social companion.
+You help the user listen to and create posts.
+If the user asks for newest posts / what's new / read the feed, call get_newest_posts with limit 5.
+If the user says they want to post, capture their words as text and call create_post.
+Be concise and natural.
+`.trim(),
+  tools: [get_newest_posts, create_post],
+});
+
+let session = null;
+
+async function start() {
+  $("start").disabled = true;
+  $("stop").disabled = false;
+
+  setStatus("requesting token...");
+  log("Requesting Realtime client secret...");
+
+  const token = await api("/api/realtime-token", {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ instructions }),
+    body: { instructions: agent.instructions },
   });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data?.error || `Token error (${r.status})`);
-  if (!data?.value || !data?.session_id) throw new Error("Bad token response");
-  return data;
+
+  const { value, project_id, mints_today, daily_limit } = token;
+  log(`Got client secret. project=${project_id} mints_today=${mints_today}/${daily_limit}`);
+
+  setStatus("connecting...");
+  log("Connecting (mic permission prompt expected)...");
+
+  session = new RealtimeSession(agent, {
+    model: "gpt-realtime",
+    config: {
+      turnDetection: {
+        type: "semantic_vad",
+        eagerness: "medium",
+        createResponse: true,
+        interruptResponse: true,
+      },
+    },
+  });
+
+  session.on("tool_approval_requested", (_ctx, _agent, request) => {
+    const raw = request?.rawItem;
+    const name = raw?.name || "unknown_tool";
+    const args = raw?.arguments ? JSON.stringify(raw.arguments) : "";
+
+    log(`Approval requested: ${name} ${args}`);
+    const ok = confirm(`Allow tool call?\n\n${name}\n${args}`);
+    if (ok) {
+      log("Approved.");
+      session.approve(request.approvalItem);
+    } else {
+      log("Rejected.");
+      session.reject(request.rawItem);
+    }
+  });
+
+  session.on("audio_interrupted", () => log("Audio interrupted (you spoke over)."));
+  session.on("history_updated", () => setStatus("live"));
+
+  await session.connect({ apiKey: value });
+
+  setStatus("live");
+  log("Connected. Say: “newest posts” or “create a post: …”");
 }
 
-async function disconnect() {
+function stop() {
   try {
-    if (!session) return;
-    if (typeof session.disconnect === "function") await session.disconnect();
-    else if (typeof session.close === "function") await session.close();
-  } finally {
-    session = null;
+    session?.close();
+  } catch {
+    // ignore
   }
+  session = null;
+  setStatus("idle");
+  $("start").disabled = false;
+  $("stop").disabled = true;
+  log("Stopped.");
 }
 
-startBtn.addEventListener("click", async () => {
-  startBtn.disabled = true;
-  statusEl.textContent = "Starting…";
-  log("Requesting ephemeral key…");
+$("start").onclick = () =>
+  start().catch((e) => {
+    log(`ERROR: ${e.message || e}`);
+    setStatus("error");
+    $("start").disabled = false;
+    $("stop").disabled = true;
+  });
 
-  const t0 = performance.now();
-
-  try {
-    const token = await fetchEphemeralKey(promptEl.value || "");
-    sessionId = token.session_id;
-
-    log(`Got token. Session: ${sessionId.slice(0, 8)}…`);
-    await postEvent("client_token_received", {
-      ms: Math.round(performance.now() - t0),
-      expires_at: token.expires_at,
-    });
-
-    const agent = new RealtimeAgent({
-      name: "Vox",
-      instructions: promptEl.value || "You are Vox, a helpful assistant.",
-    });
-
-    session = new RealtimeSession(agent, { model: "gpt-realtime" });
-
-    const t1 = performance.now();
-    log("Connecting voice session…");
-    await postEvent("client_connect_start");
-
-    // Agents SDK quickstart: connect with the ek_... token. :contentReference[oaicite:6]{index=6}
-    await session.connect({ apiKey: token.value });
-
-    const msConnect = Math.round(performance.now() - t1);
-    statusEl.textContent = "Connected — talk now";
-    stopBtn.disabled = false;
-    log(`Connected (connect ms: ${msConnect})`);
-    await postEvent("client_connected", { ms: msConnect });
-  } catch (err) {
-    log(`ERROR: ${err?.message || err}`);
-    statusEl.textContent = "Error";
-    await postEvent("client_error", { message: err?.message || String(err) });
-    startBtn.disabled = false;
-    await disconnect();
-  }
-});
-
-stopBtn.addEventListener("click", async () => {
-  stopBtn.disabled = true;
-  statusEl.textContent = "Stopping…";
-  log("Disconnecting…");
-  await postEvent("client_disconnect_click");
-  await disconnect();
-  await postEvent("client_disconnected");
-  statusEl.textContent = "Idle";
-  startBtn.disabled = false;
-  log("Disconnected.");
-});
-
-window.addEventListener("beforeunload", () => {
-  postEvent("client_unload").finally(() => disconnect());
-});
+$("stop").onclick = stop;

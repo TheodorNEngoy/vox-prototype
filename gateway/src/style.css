@@ -1,10 +1,12 @@
-﻿:root { font-family: system-ui, Arial, sans-serif; }
-body { margin: 0; }
-.wrap { max-width: 860px; margin: 40px auto; padding: 0 16px; }
-.hint { opacity: 0.8; }
-.row { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
-button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
-#status { opacity: 0.85; }
-.label { display:block; margin-top: 16px; margin-bottom: 6px; font-weight: 600; }
-textarea { width: 100%; font-size: 14px; padding: 10px; }
-.log { margin-top: 16px; padding: 12px; border: 1px solid #ddd; border-radius: 10px; min-height: 120px; white-space: pre-wrap; }
+:root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+body { margin: 0; background: #0b0c10; color: #e7e7e7; }
+.shell { max-width: 900px; margin: 0 auto; padding: 24px; }
+.card { background: #12141b; border: 1px solid #222636; border-radius: 14px; padding: 16px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+input { background: #0b0c10; border: 1px solid #2a3146; color: #e7e7e7; padding: 10px 12px; border-radius: 10px; width: 260px; }
+button { background: #2a3146; border: 0; color: #fff; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
+button[disabled] { opacity: .5; cursor: not-allowed; }
+.small { opacity: .8; font-size: 13px; }
+.log { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; max-height: 260px; overflow: auto; background: #0b0c10; border: 1px solid #2a3146; padding: 12px; border-radius: 10px; }
+.h1 { font-size: 28px; margin: 0 0 8px; }
+.badge { display:inline-block; padding: 3px 8px; border-radius: 999px; background:#1b2233; border:1px solid #2a3146; font-size:12px; }

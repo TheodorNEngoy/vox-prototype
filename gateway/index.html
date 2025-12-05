@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -6,26 +6,7 @@
     <title>Vox Gateway</title>
   </head>
   <body>
-    <main class="wrap">
-      <h1>Vox Gateway</h1>
-
-      <p class="hint">
-        Click Start, allow microphone, then speak.
-        <a href="/console.html">Open Console</a>
-      </p>
-
-      <label class="label" for="prompt">Agent instructions</label>
-      <textarea id="prompt" rows="6"></textarea>
-
-      <div class="row">
-        <button id="startBtn">Start</button>
-        <button id="stopBtn" disabled>Stop</button>
-        <span id="status" aria-live="polite">Idle</span>
-      </div>
-
-      <div class="log" id="log" role="log" aria-live="polite"></div>
-    </main>
-
+    <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

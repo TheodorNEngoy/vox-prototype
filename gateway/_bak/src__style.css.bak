@@ -1,0 +1,10 @@
+﻿:root { font-family: system-ui, Arial, sans-serif; }
+body { margin: 0; }
+.wrap { max-width: 860px; margin: 40px auto; padding: 0 16px; }
+.hint { opacity: 0.8; }
+.row { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
+#status { opacity: 0.85; }
+.label { display:block; margin-top: 16px; margin-bottom: 6px; font-weight: 600; }
+textarea { width: 100%; font-size: 14px; padding: 10px; }
+.log { margin-top: 16px; padding: 12px; border: 1px solid #ddd; border-radius: 10px; min-height: 120px; white-space: pre-wrap; }
