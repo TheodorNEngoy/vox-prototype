@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vox Console</title>
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>Vox Console</h1>
+      <p class="hint">
+        Session logs + replay (no auth yet — demo only).
+        <a href="/">Back to Vox</a>
+      </p>
+
+      <div class="row">
+        <button id="refreshBtn">Refresh</button>
+        <span id="status" aria-live="polite">Idle</span>
+      </div>
+
+      <h2>Sessions</h2>
+      <div id="sessions" class="log"></div>
+
+      <h2>Replay</h2>
+      <div id="replay" class="log"></div>
+    </main>
+
+    <script type="module" src="/src/console.js"></script>
+  </body>
+</html>
